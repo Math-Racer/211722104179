@@ -1,31 +1,45 @@
-import requests
 from flask import Flask, request, jsonify
-import datetime
-from headers import headers  
+import requests
+from headers import headers
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-API_URL = "http://20.244.56.144/evaluation-service/stocks/"
+BASE_URL = "http://20.244.56.144/evaluation-service/stocks"
 
-@app.route('/stocks/<ticker>', methods=['GET'])
-def get_average_stock_price(ticker):
-    minutes = int(request.args.get('minutes', 0))
+@app.route("/stocks/<ticker>")
+def get_stock_price_history(ticker):
+    try:
+        minutes = int(request.args.get("minutes", 60))
+        since_time = datetime.utcnow() - timedelta(minutes=minutes)
 
-    response = requests.get(f"{API_URL}{ticker}", headers=headers)
-    data = response.json()
+        
+        response = requests.get(f"{BASE_URL}/{ticker}", headers=headers)
+        if response.status_code != 200:
+            return jsonify({"error": "Failed to fetch stock data"}), response.status_code
 
-    prices = [p['price'] for p in data['priceHistory'] if within_last_m_minutes(p['lastUpdatedAt'], minutes)]
-    
-    avg_price = sum(prices) / len(prices) if prices else 0
+        all_prices = response.json()  
+        filtered_prices = []
 
-    return jsonify({
-        "averageStockPrice": avg_price,
-        "priceHistory": prices
-    })
+        for entry in all_prices:
+            updated_time = datetime.fromisoformat(entry["lastUpdatedAt"].replace("Z", "+00:00"))
+            if updated_time >= since_time:
+                filtered_prices.append(entry)
 
-def within_last_m_minutes(timestamp, m):
-    dt = datetime.datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.%fZ")
-    return (datetime.datetime.utcnow() - dt).seconds <= (m * 60)
+        return jsonify({
+            "ticker": ticker,
+            "priceHistory": filtered_prices
+        })
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/stocks/<ticker>/aggregation")
+def incomplete_average_api(ticker):
+    return "Not implemented yet", 501 # TODO: will implement after get_stock_price_history is working
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=9876)
